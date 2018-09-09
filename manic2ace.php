@@ -41,6 +41,10 @@ class Importer{
 		$this->config = json_decode(file_get_contents($config_file));
 	}
 
+	/**
+	 * Generate prepare.json file
+	 * This file converts your CSV file to json format.
+	 */
 	public function generatePrepareFile(){
 		//At first import the csv file
 		$data = $this->loadCsvFile();
@@ -54,6 +58,12 @@ class Importer{
 		file_put_contents( $this->prepare_file, $json);
 
 	}
+
+
+	/**
+	 * Load the specified CSV file
+	 * @return array - converted CSV file
+	 */
 	public function loadCsvFile(){
 		$data = new ParseCsv\Csv($this->import_file);
 
@@ -67,6 +77,7 @@ class Importer{
 				"task_id" => -1,
 				"task_name" => "",
 				"task_project" => "",
+				"comments" => "",
 			];
 			$output["items"][$hash]['data'] = $item;
 
@@ -76,7 +87,9 @@ class Importer{
 	}
 
 
-	//Login to aceproject
+	/**
+	 * Login to aceproject
+	 */
 	public function aceLogin(){
 		$re = AceProject::login(
 			$this->config->aceproject_username,
@@ -90,6 +103,12 @@ class Importer{
 		}
 	}
 
+	/**
+	 * Get all projects from aceproject
+	 * There will be only one API call. The projects will be stored in data/projects.json
+	 * If you need to refresh the projects, just remove the projects.json file
+	 * @return array
+	 */
 	public function aceGetProjects(){
 
 		if($this->projects !== null){
@@ -154,32 +173,62 @@ class Importer{
 
 	}
 
+	/**
+	 * Load Aceproject config data
+	 */
 	public function loadAceprojectData(){
 		$this->aceLogin();
 		$this->timeTypes = Time::GetTimeTypes();
-
-
 	}
 
+	/**
+	 * Import prepare.json file to aceproject
+	 */
 	public function importPrepFile(){
 		$items = json_decode(file_get_contents($this->prepare_file), true);
+		$json_error = json_last_error();
+
+		if($json_error){
+			echo "JSON_ERROR!";
+			print_r($json_error);
+			die();
+		}else{
+			echo "JSON file looks good.\n";
+		}
+
 		$projects = $this->aceGetProjects();
+		$nr = 0;
 
 
 		foreach($items['items'] as $hash => $item){
+			$nr++;
+
+			echo "####### NR = $nr\n";
 
 			if($item['aceproject']['task_id'] == -1){
 				continue;
 			}
 
 			$this->importTask($item, $hash);
-
+			
+			//Wait few seconds between the api calls so we wont get banned ;)
+			echo "\rWaiting...";
+			flush();
+			sleep(4);
+			flush();
 		}
+
+		echo "\n**** DONE ****\n\n";
 
 	}
 
 
 
+	/**
+	 * Import a single task
+	 * @param  array $taskData
+	 * @param  string $hash     Unique hash
+	 */
 	public function importTask($taskData, $hash = ''){
 			echo "Importing $hash\n";
 
@@ -203,6 +252,7 @@ class Importer{
 
 
 			foreach($weekData as $wd){
+
 				if($wd['worked_hours'] == 0){
 					//Do nothing when all days are set to 0.00
 					continue;
@@ -229,7 +279,9 @@ class Importer{
 					'hoursday7' => $dayValues[6],
 				];
 
-				print_r($params);
+				if(isset($aceproject['comments'])){
+					$params['comments'] = $aceproject['comments'];
+				}
 
 
 				//Add time:
@@ -296,6 +348,12 @@ class Importer{
 
 	}
 
+	/**
+	 * Convert a list of dates into week chunks
+	 * These chunks are needed for creating time sheet entries in AceProject
+	 * @param  array $data array with dates ['2018-12-31' => 0.45]
+	 * @return array
+	 */
 	public function getWeekData($data){
 
 		$weekData = [];
@@ -335,7 +393,7 @@ class Importer{
 		}
 
 		//fill missing days when on month start / end
-		//foreach($weekData as $);
+		//This is needed for AceProject as it wants to specify the "work week" start / end.
 		foreach($weekData as &$d){
 			if(count($d['days']) != 7){
 				//get first day of array:
@@ -385,6 +443,14 @@ class Importer{
 
 	}
 
+	/**
+	 * Add a task to aceproject
+	 * This also checks if the task is already there with the same name
+	 * If the task exists, nothing will be inserted and the task id will be returned
+	 * @param string $task_name    Name of the task (aka Summary in AceProject)
+	 * @param string $task_project Project name (also partial) or project id
+	 * @return  int task_id
+	 */
 	public function addTask($task_name, $task_project){
 		$project_id = $this->getProjectId($task_project);
 
@@ -425,7 +491,12 @@ class Importer{
 
 	}
 
-	//Check if a task exists
+	/**
+	 * Check if the task exists
+	 * @param  string $task_name - Name (Summary of the task)
+	 * @param  int $project_id
+	 * @return int|bool - False when not found, array with ask if found
+	 */
 	public function taskExists($task_name, $project_id){
 		$this->aceLogin();
 
@@ -445,7 +516,10 @@ class Importer{
 
 	}
 
-	//Check aceproject api error
+	/**
+	 * Check if the last API call to AceProject returned some errors.
+	 * @param  boolean $die if true, script will die on any errors
+	 */
 	private function checkAceErrors($die = true){
 		$errors = AceProject::getLastError();
 		if(!empty($errors)){
@@ -456,51 +530,20 @@ class Importer{
 		}
 	}
 
-	public function loadWorkItems(){
-		$this->aceLogin();
-
-		$weeks = TimeSheet::GetMyWorkItems([
-			"timesheetdatefrom" => "2018-08-06",
-			//"timesheetdateto" => "2018-09-05",
-		]);
-
-		$this->checkAceErrors();
-
-		print_r($weeks);
-		die();
-
-
-
-	}
-
-	public function test(){
-		$this->aceLogin();
-		//$weeks = TimeSheet::GetMyWeeks();
-		$weeks = TimeSheet::GetMyWeeks();
-
-		print_r($weeks);
-
-	}
-
 
 }
 
 $i = new Importer();
 
-//Step 0:
+die("Hi, please edit the manic2ace.php file and remove this die. Read the comments to understand how it works!");
+
+//Step 1:
 //Generate a prepare.json file, here we should connect the aceproject tasks
 //$i->generatePrepareFile();
 
-//Step 1:
-//Connect with aceproject
-//$u->loadAceprojectData();
-
 //Step 2:
 //Import the modified prepare.json
+$i->loadAceprojectData();
 $i->importPrepFile();
-
-//$i->loadWorkItems();
-
-//$i->test();
 
 
