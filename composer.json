@@ -1,0 +1,13 @@
+{
+    "name": "millsoft/manictime2aceproject",
+    "authors": [
+        {
+            "name": "Michael Milawski",
+            "email": "mm@millsoft.de"
+        }
+    ],
+    "require": {
+        "parsecsv/php-parsecsv": "^1.1",
+        "millsoft/aceproject": "^0.11.0"
+    }
+}
